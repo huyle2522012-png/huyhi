@@ -163,6 +163,8 @@ header{backdrop-filter:none;background:rgba(255,255,255,.95)}.ov{backdrop-filter
 #app.enter>.hero{animation:rise .65s cubic-bezier(.2,.8,.2,1) backwards}
 .hero::before{inset:auto;left:0;top:0;width:520px;height:520px;margin:-260px 0 0 -260px;background:radial-gradient(circle,rgba(255,255,255,.26),transparent 62%);transform:translate(var(--mx,620px),var(--my,60px));will-change:transform}
 @media(prefers-reduced-motion:reduce){.hero::after{animation:none!important}}
+/* nền trang trong suốt để không che nền động (kể cả khi Chrome ép chế độ tối) */
+html{background:var(--bg)}body{background:transparent}
 </style>
 </head>
 <body>
@@ -174,18 +176,18 @@ header{backdrop-filter:none;background:rgba(255,255,255,.95)}.ov{backdrop-filter
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function uid(){return Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4)}
-const KEY='smartvocab_v1',LV=['A1','A2','B1','B2','C1'];
+const PROXY_URL='https://noisy-wave-e6dd.huyle2522012.workers.dev',AI_MODEL='gemini-3.5-flash-lite',KEY='smartvocab_v1',LV=['A1','A2','B1','B2','C1'];
 const PROMPT='You are an OCR assistant for English learners. Read the image and extract ONLY the English vocabulary items that actually appear in it (words or short phrases), with the Vietnamese meaning if it is written in the image. Never invent words that are not in the image. If a Vietnamese meaning is missing, add a concise one. Fill in ipa, pos (noun, verb, adjective...), a short, SIMPLE example sentence (ex) whose difficulty matches the CEFR level of the word (A1-A2 words: 5-9 words, everyday context, nothing harder than the target word; never an academic or formal sentence) and its Vietnamese translation (exVi) when missing. Return ONLY a JSON array of objects: [{"en":"","vi":"","ipa":"","pos":"","ex":"","exVi":""}]. If there is no vocabulary, return [].';
 const WORKER=`export default{async fetch(req,env){
  const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'Content-Type'};
  if(req.method==='OPTIONS')return new Response(null,{headers:cors});
  const {image,mime,prompt}=await req.json();
- const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_KEY},body:JSON.stringify({contents:[{parts:[{text:prompt},...(image?[{inline_data:{mime_type:mime,data:image}}]:[])]}],generationConfig:{responseMimeType:'application/json'}})});
+ const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_KEY},body:JSON.stringify({contents:[{parts:[{text:prompt},...(image?[{inline_data:{mime_type:mime,data:image}}]:[])]}],generationConfig:{responseMimeType:'application/json'}})});
  const j=await r.json();
  return new Response(JSON.stringify({text:j.candidates?.[0]?.content?.parts?.[0]?.text||''}),{headers:{...cors,'Content-Type':'application/json'}})}}`;
 
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.decks)return d}catch(e){}
- return{decks:[{id:uid(),name:'Bộ từ vựng của tôi',words:[]}],log:{},set:{mode:'gemini',key:'',model:'gemini-2.0-flash',proxy:''}}}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.decks){const s=d.set=d.set||{};if(!s.key)s.mode='proxy';if(!s.proxy)s.proxy=PROXY_URL;if(!s.model||/gemini-2\.0/.test(s.model))s.model=AI_MODEL;return d}}catch(e){}
+ return{decks:[{id:uid(),name:'Bộ từ vựng của tôi',words:[]}],log:{},set:{mode:'proxy',key:'',model:AI_MODEL,proxy:PROXY_URL}}}
 let D=load();
 let S={sel:new Set(),selMode:false,view:'home',deck:null,q:'',lvl:'',scan:{imgs:[],items:null,busy:false,err:''},P:null};
 function save(){try{localStorage.setItem(KEY,JSON.stringify(D));localStorage.setItem('smartvocab_dirty','1')}catch(e){toast('Không lưu được dữ liệu (bộ nhớ đầy?)')}
@@ -265,22 +267,27 @@ function vStats0(){const c=counts();let n=0,cc=0;Object.values(D.log).forEach(t=
 const ok=s=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
 function modal(h){$('#modal').innerHTML=h?`<div class="ov" data-act="closem"><div class="sheet">${h}</div></div>`:''}
 function wordForm(w){w=w||{};return `<h2>${w.id?'Sửa từ':'Thêm từ'}</h2><div class="f2"><div><label class="l">English *</label><input id="f_en" value="${esc(w.en)}"></div><div><label class="l">Nghĩa tiếng Việt *</label><input id="f_vi" value="${esc(w.vi)}"></div><div><label class="l">IPA</label><input id="f_ipa" value="${esc(w.ipa)}"></div><div><label class="l">Loại từ</label><input id="f_pos" value="${esc(w.pos)}" placeholder="noun, verb…"></div></div><label class="l">Câu ví dụ</label><input id="f_ex" value="${esc(w.ex)}"><label class="l">Dịch câu ví dụ</label><input id="f_exVi" value="${esc(w.exVi)}"><label class="l">Đáp án chấp nhận thêm (cách nhau bằng dấu ;)</label><input id="f_acc" value="${esc((w.acc||[]).join('; '))}"><label class="l">Trình độ</label>${lvSel('f_lv',w.level)}<div class="row" style="margin-top:14px"><button class="btn pri" data-act="savew" data-id="${w.id||''}">Lưu</button><button class="btn" data-act="closem">Hủy</button></div>`}
-function readImg(file){return new Promise((res,rej)=>{const r=new FileReader();r.onerror=()=>rej(Error('Không đọc được file'));r.onload=()=>{const i=new Image();i.onerror=()=>rej(Error('File không phải ảnh hợp lệ'));i.onload=()=>{const m=1600,k=Math.min(1,m/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);c.getContext('2d').drawImage(i,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.88))};i.src=r.result};r.readAsDataURL(file)})}
+function readImg(file){return new Promise((res,rej)=>{const r=new FileReader();r.onerror=()=>rej(Error('Không đọc được file'));r.onload=()=>{const i=new Image();i.onerror=()=>rej(Error('File không phải ảnh hợp lệ'));i.onload=()=>{const m=1280,k=Math.min(1,m/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);c.getContext('2d').drawImage(i,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.8))};i.src=r.result};r.readAsDataURL(file)})}
 function parseItems(t){t=String(t).replace(/```json|```/g,'');let a=t.indexOf('['),b=t.lastIndexOf(']'),j;
  try{j=JSON.parse(a>=0&&b>a?t.slice(a,b+1):t)}catch(e){throw Error('AI trả về dữ liệu không đọc được. Hãy thử ảnh rõ hơn.')}
  if(!Array.isArray(j))j=j.words||[];return j.map(x=>mk(x)).filter(x=>x.en)}
 function thumbsHtml(s){return s.imgs.length?`<div class="thumbs">${s.imgs.map((u,i)=>`<div class="th"><img src="${u}" alt="Ảnh ${i+1}"><button class="x" data-act="rmimg" data-i="${i}" aria-label="Xóa ảnh">×</button></div>`).join('')}</div><div class="row"><button class="btn pri" data-act="ocr" ${s.busy?'disabled':''}>${s.busy?(s.prog||'Đang nhận diện…'):'Nhận diện '+s.imgs.length+' ảnh'}</button>${s.busy?'':'<button class="btn sm" data-act="clearimgs">Xóa tất cả ảnh</button>'}</div>`:''}
 async function addFiles(fs){const sc=S.scan;let bad=0;for(const f of fs){if(!f||!/^image\//.test(f.type)){bad++;continue}if(sc.imgs.length>=12){toast('Tối đa 12 ảnh mỗi lần');break}try{sc.imgs.push(await readImg(f))}catch(e){bad++}}
  sc.err=bad?bad+' file không đọc được hoặc không phải ảnh.':'';sc.items=null;S.view='scan';render()}
+async function authH(){const h={'Content-Type':'application/json'};if(D.set.proxy===PROXY_URL){const k=window.getIdToken?await window.getIdToken():null;if(!k)throw Error('Hãy đăng nhập Google (nút ở góc trên bên phải) để dùng AI');h.Authorization='Bearer '+k}return h}
+function pxErr(st){return Error(st===401?'Phiên đăng nhập hết hạn, hãy đăng nhập Google lại':st===429?'Hôm nay bạn đã dùng hết lượt AI, mai quay lại nhé':st===403?'Trang web này không được phép dùng AI':'Dịch vụ AI đang lỗi ('+st+'), thử lại sau')}
 async function ocrOne(img){const s=D.set,b64=img.split(',')[1];let text;
- if(s.mode==='proxy'){const r=await fetch(s.proxy,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,mime:'image/jpeg',prompt:PROMPT})});if(!r.ok)throw Error('Proxy trả về lỗi '+r.status);const j=await r.json();text=typeof j==='string'?j:(j.text||JSON.stringify(j.words||j))}
+ if(s.mode==='proxy'){const r=await fetch(s.proxy,{method:'POST',headers:await authH(),body:JSON.stringify({image:b64,mime:'image/jpeg',prompt:PROMPT})});if(!r.ok)throw pxErr(r.status);const j=await r.json();text=typeof j==='string'?j:(j.text||JSON.stringify(j.words||j))}
  else text=await gem({contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:'image/jpeg',data:b64}}]}],generationConfig:{responseMimeType:'application/json',temperature:.1}});
  return parseItems(text)}
 async function ocr(){const s=D.set,sc=S.scan;if(!sc.imgs.length)return;if((s.mode==='proxy'&&!s.proxy)||(s.mode!=='proxy'&&!s.key)){toast('Hãy cấu hình AI trước');return A.settings()}
  sc.busy=true;sc.err='';sc.items=null;const all=[],errs=[];
- for(let i=0;i<sc.imgs.length;i++){sc.prog='Đang nhận diện ảnh '+(i+1)+'/'+sc.imgs.length+'…';aiLoad('Nhận diện các từ xuất hiện trong ảnh','Ảnh '+(i+1)+'/'+sc.imgs.length+' · Bạn có thể chuyển sang tab khác — AI vẫn tiếp tục chạy nền.',Math.round(i/sc.imgs.length*100));if(S.view==='scan')render();
-  try{const it=await ocrOne(sc.imgs[i]);if(!it.length)errs.push('Ảnh '+(i+1)+': không thấy từ vựng');it.forEach(w=>{if(!all.some(x=>x.en.toLowerCase()===w.en.toLowerCase()))all.push(w)})}
-  catch(e){errs.push('Ảnh '+(i+1)+': '+(e.message==='Failed to fetch'?'không kết nối được tới dịch vụ AI (kiểm tra mạng, API key hoặc CORS của proxy)':e.message))}}
+ const n=sc.imgs.length,res=new Array(n),er=new Array(n);let nx=0,dn=0;
+ const upd=()=>{const k=Math.min(dn+1,n);sc.prog='Đang nhận diện ảnh '+k+'/'+n+'…';aiLoad('Nhận diện các từ xuất hiện trong ảnh','Ảnh '+k+'/'+n+' · Bạn có thể chuyển sang tab khác — AI vẫn tiếp tục chạy nền.',Math.round(dn/n*100));if(S.view==='scan')render()};
+ upd();
+ const run=async()=>{while(nx<n){const i=nx++;try{const it=await ocrOne(sc.imgs[i]);if(!it.length)er[i]='Ảnh '+(i+1)+': không thấy từ vựng';res[i]=it}catch(e){er[i]='Ảnh '+(i+1)+': '+(e.message==='Failed to fetch'?'không kết nối được tới dịch vụ AI (kiểm tra mạng rồi thử lại)':e.message)}dn++;upd()}};
+ await Promise.all([run(),run(),run()]);
+ res.forEach(it=>(it||[]).forEach(w=>{if(!all.some(x=>x.en.toLowerCase()===w.en.toLowerCase()))all.push(w)}));er.forEach(x=>x&&errs.push(x));
  sc.busy=false;sc.items=all.length?all:null;sc.err=errs.join(' · ');if(!all.length&&!sc.err)sc.err='Không nhận diện được từ vựng nào.';aiDone();if(S.view==='scan')render();else toast('Quét xong '+all.length+' từ — mở tab Quét ảnh để xem kết quả',5000);if(all.length)sfx('ok')}
 const toCSV=()=>'\ufeff'+[['deck','en','vi','ipa','pos','ex','exVi','level','known']].concat(D.decks.flatMap(d=>d.words.map(w=>[d.name,w.en,w.vi,w.ipa,w.pos,w.ex,w.exVi,w.level,w.known?1:0]))).map(r=>r.map(c=>'"'+String(c??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
 function parseCSV(t){const rows=[];let r=[],c='',q=false;t=t.replace(/^\ufeff/,'');for(let i=0;i<t.length;i++){const ch=t[i];if(q){if(ch=='"'){if(t[i+1]=='"'){c+='"';i++}else q=false}else c+=ch}else if(ch=='"')q=true;else if(ch==','){r.push(c);c=''}else if(ch=='\n'||ch=='\r'){if(ch=='\r'&&t[i+1]=='\n')i++;r.push(c);c='';rows.push(r);r=[]}else c+=ch}if(c||r.length){r.push(c);rows.push(r)}return rows.filter(x=>x.some(v=>v.trim()))}
@@ -303,11 +310,11 @@ const A={
  dobulk(){const list=[];$('#bt').value.split('\n').forEach(l=>{l=l.trim();if(!l)return;let p=/[|\t]/.test(l)?l.split(/\s*[|\t]\s*/):l.split(/\s+[-–—:=]\s+|\s*[:=]\s*/,2);if(p.length<2)p=l.split(/\s*[-–—]\s*/,2);if(p.length>=2)list.push({en:p[0],vi:p[1],pos:p[2],ipa:p[3]})});
   if(!list.length)return toast('Không đọc được dòng nào. Kiểm tra định dạng.');const n=addWords(D.decks.find(d=>d.id===S.deck),list);modal('');render();toast('Đã thêm '+n+' từ ('+(list.length-n)+' bị bỏ qua do trùng/thiếu)')},
  export(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([toCSV()],{type:'text/csv;charset=utf-8'}));a.download='smart-vocabulary.csv';a.click();URL.revokeObjectURL(a.href)},
- settings(){const s=D.set;modal(`<h2>Cấu hình AI quét ảnh</h2><label class="l">Cách kết nối</label><select id="s_mode"><option value="gemini" ${s.mode!=='proxy'?'selected':''}>Gemini API key (chạy thử trên máy)</option><option value="proxy" ${s.mode==='proxy'?'selected':''}>Proxy / serverless của bạn (khuyên dùng khi triển khai)</option></select>
+ settings(){const s=D.set;modal(`<h2>Cấu hình AI quét ảnh</h2><p class="ex">AI do SmartVocab cung cấp sẵn: bạn chỉ cần <b>đăng nhập Google</b>, không cần nhập API key.</p><details><summary>Nâng cao: dùng API key hoặc proxy riêng</summary><label class="l">Cách kết nối</label><select id="s_mode"><option value="gemini" ${s.mode!=='proxy'?'selected':''}>Gemini API key (chạy thử trên máy)</option><option value="proxy" ${s.mode==='proxy'?'selected':''}>Proxy / serverless của bạn (khuyên dùng khi triển khai)</option></select>
   <label class="l">Gemini API key (lấy tại aistudio.google.com/apikey)</label><input id="s_key" type="password" value="${esc(s.key)}" autocomplete="off"><label class="l">Model</label><input id="s_model" value="${esc(s.model)}"><label class="l">URL proxy</label><input id="s_proxy" value="${esc(s.proxy)}" placeholder="https://ten-worker.ten-ban.workers.dev">
-  <p class="ex">Key nhập ở chế độ Gemini được lưu trong trình duyệt của bạn, chỉ nên dùng khi chạy thử. Khi đưa lên mạng, hãy dùng proxy để giấu key trên server.</p>
+  <p class="ex">Key nhập ở chế độ Gemini được lưu trong trình duyệt của bạn, chỉ nên dùng khi chạy thử. Khi đưa lên mạng, hãy dùng proxy để giấu key trên server.</p></details>
   <h3 style="margin-top:14px">Giọng đọc</h3>${voiceHtml()}<details><summary>Ví dụ Cloudflare Worker (đặt GEMINI_KEY trong Secrets)</summary><pre>${esc(WORKER)}</pre></details><div class="row" style="margin-top:12px"><button class="btn pri" data-act="saveset">Lưu cấu hình</button><button class="btn" data-act="closem">Đóng</button></div>`)},
- saveset(){Object.assign(D.set,{mode:$('#s_mode').value,key:$('#s_key').value.trim(),model:$('#s_model').value.trim()||'gemini-2.0-flash',proxy:$('#s_proxy').value.trim(),accent:($('#s_acc')||{}).value||D.set.accent,voice:$('#s_voice')?$('#s_voice').value:D.set.voice,rate:$('#s_rate')?+$('#s_rate').value:D.set.rate});save();modal('');render();toast('Đã lưu cấu hình')},
+ saveset(){Object.assign(D.set,{mode:$('#s_mode').value,key:$('#s_key').value.trim(),model:$('#s_model').value.trim()||AI_MODEL,proxy:$('#s_proxy').value.trim(),accent:($('#s_acc')||{}).value||D.set.accent,voice:$('#s_voice')?$('#s_voice').value:D.set.voice,rate:$('#s_rate')?+$('#s_rate').value:D.set.rate});save();modal('');render();toast('Đã lưu cấu hình')},
  quick(el){const sc=el.dataset.sc,pool=sc==='due'?allW().filter(isDue).sort((a,b)=>a.srs.next<b.srs.next?-1:1).concat(allW().filter(isNew).slice(0,10)):allW().filter(isWeak);
   if(!pool.length)return toast(sc==='due'?'Hôm nay chưa có từ đến hạn 🎉':'Chưa có từ yếu');S.view='practice';A.start({dataset:{m:'card'},pool})},
  rate(el){const P=S.P;if(!P||P.mode!=='card'||P.done)return;if(!P.flip){A.flip();return}const w=P.list[P.i],q=+el.dataset.q;applySrs(w,q);logP(w.id,q>0);P.rated=(P.rated||0)+1;
@@ -419,7 +426,7 @@ async function gem(body){const s=D.set,ms=[s.model||'gemini-2.0-flash','gemini-3
    err=Error(j.error?.message||'Lỗi API '+r.status);if(![404,429,500,503,504].includes(r.status)){err.fatal=true;throw err}}catch(e){if(e.fatal)throw e;err=e}}
  throw err}
 async function aiText(p){const s=D.set;let r,j;
- if(s.mode==='proxy'){r=await fetch(s.proxy,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:null,mime:'',prompt:p})});if(!r.ok)throw Error('Proxy lỗi '+r.status);j=await r.json();return typeof j==='string'?j:(j.text||JSON.stringify(j.words||j))}
+ if(s.mode==='proxy'){r=await fetch(s.proxy,{method:'POST',headers:await authH(),body:JSON.stringify({image:null,mime:'',prompt:p})});if(!r.ok)throw pxErr(r.status);j=await r.json();return typeof j==='string'?j:(j.text||JSON.stringify(j.words||j))}
  return gem({contents:[{parts:[{text:p}]}],generationConfig:{responseMimeType:'application/json',temperature:.5}})}
 async function startCloze(pool){const P=S.P={mode:'cloze',pool,loading:true,queue:[],i:0,c:0,n:0,res:null};render();
  const pick=shuf(pool).slice(0,12),ai=D.set.mode==='proxy'?D.set.proxy:D.set.key;
@@ -605,6 +612,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+window.getIdToken = async () => auth.currentUser ? auth.currentUser.getIdToken() : null;
 
 const SYNC_KEY = 'smartvocab_sync', DIRTY_KEY = 'smartvocab_dirty';
 const LOCAL_ONLY = ['mode', 'key', 'model', 'proxy'];   // KHÔNG đưa lên cloud (có API key)
@@ -631,7 +639,7 @@ function paintBtn(user) {
 const clone = o => JSON.parse(JSON.stringify(o));
 const wordCount = d => (d.decks || []).reduce((n, k) => n + (k.words || []).length, 0);
 const isEmpty = d => wordCount(d) === 0 && !Object.keys(d.log || {}).length;
-const freshData = () => ({ decks: [{ id: uid(), name: 'Bộ từ vựng của tôi', words: [] }], log: {}, set: { mode: 'gemini', key: '', model: 'gemini-2.0-flash', proxy: '' } });
+const freshData = () => ({ decks: [{ id: uid(), name: 'Bộ từ vựng của tôi', words: [] }], log: {}, set: { mode: 'proxy', key: '', model: AI_MODEL, proxy: PROXY_URL } });
 
 function toCloud(d) {                 // bỏ API key / proxy trước khi đẩy lên
   const c = clone(d); c.set = c.set || {};
@@ -641,10 +649,10 @@ function toCloud(d) {                 // bỏ API key / proxy trước khi đẩ
 function fromCloud(c) {               // giữ lại cấu hình AI riêng của máy này
   const r = clone(c); r.set = r.set || {};
   LOCAL_ONLY.forEach(k => { if (D.set && D.set[k] !== undefined) r.set[k] = D.set[k]; });
-  if (r.set.mode === undefined) r.set.mode = 'gemini';
+  if (r.set.mode === undefined) r.set.mode = 'proxy';
   if (r.set.key === undefined) r.set.key = '';
-  if (r.set.model === undefined) r.set.model = 'gemini-2.0-flash';
-  if (r.set.proxy === undefined) r.set.proxy = '';
+  if (r.set.model === undefined) r.set.model = AI_MODEL;
+  if (r.set.proxy === undefined) r.set.proxy = PROXY_URL;
   r.log = r.log || {};
   return r;
 }
